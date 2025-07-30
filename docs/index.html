@@ -106,30 +106,6 @@
 						console.error("Clipboard paste error:", err);
 					});
 				};
-				
-				newImports.env.js_paste_from_clipboard_to_search = function(ptr) {
-					// Ensure a user gesture triggers this function!
-					navigator.clipboard.readText().then(function(text) {
-						// Convert text to UTF-8 bytes
-						if (text.length >= 1024) {
-							console.error("Text too long for search clipboard paste callback");
-							return; // Prevent buffer overflow
-						}
-						const encoder = new TextEncoder();
-						const utf8 = encoder.encode(text);
-
-						// Write bytes to WASM memory
-						const wasmMemory = odinMemoryInterface.memory;
-						const memView = new Uint8Array(wasmMemory.buffer, ptr, utf8.length);
-						memView.set(utf8);
-
-						// Odin callback, must be exported
-						const paste_to_search_callback = odinMemoryInterface.exports.paste_to_search_callback;
-						paste_to_search_callback(utf8.length);
-					}).catch(function(err) {
-						console.error("Clipboard paste to search error:", err);
-					});
-				};
 
 				return WebAssembly.instantiateStreaming(fetch("index.wasm"), newImports).then(function(output) {
 					var e = output.instance.exports;
@@ -174,11 +150,40 @@
 					}
 				}, 250); // Check every 250ms
 
+				// Track if we're in text input mode
+				let inTextInputMode = false;
+				
+				// Function to query Odin for text input focus state
+				function isTextInputFocused() {
+					// Call the exported Odin function
+					// This function returns 1 if text input is focused, 0 otherwise
+					try {
+						if (typeof odinMemoryInterface.exports.web_is_text_input_focused === 'function') {
+							return odinMemoryInterface.exports.web_is_text_input_focused() === 1;
+						}
+					} catch (e) {
+						console.error("Error checking text input focus:", e);
+					}
+					return false;
+				}
+				
 				// Keydown event handling
 				window.addEventListener('keydown', e => {
-					console.log('Keydown event:', e.key, 'Ctrl:', e.ctrlKey, 'Alt:', e.altKey, 'Shift:', e.shiftKey);
+					// Update text input mode by querying Odin directly
+					inTextInputMode = isTextInputFocused();
 					
-					// Check if this is an app hotkey
+					console.log('Keydown event:', e.key, 'Ctrl:', e.ctrlKey, 'Alt:', e.altKey, 'Shift:', e.shiftKey, 'TextMode:', inTextInputMode);
+					
+					// If we're in text input mode and this is a single character without modifiers
+					// Then always allow it through to the text input handler regardless of hotkey status
+					if (inTextInputMode && e.key.length === 1 && !e.ctrlKey && !e.altKey && !e.metaKey) {
+						e.preventDefault(); // Prevent default browser behavior
+						console.log('Text character captured (in text mode):', e.key);
+						for (const cp of e.key) key_input_stack.push(cp.codePointAt(0));
+						return;
+					}
+					
+					// For other cases, check if this is an app hotkey
 					if (matchesHotkey(e, appHotkeys)) {
 						e.preventDefault(); // Prevent default browser behavior
 						console.log('App hotkey captured:', e.key);
