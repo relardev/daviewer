@@ -106,6 +106,30 @@
 						console.error("Clipboard paste error:", err);
 					});
 				};
+				
+				newImports.env.js_paste_from_clipboard_to_search = function(ptr) {
+					// Ensure a user gesture triggers this function!
+					navigator.clipboard.readText().then(function(text) {
+						// Convert text to UTF-8 bytes
+						if (text.length >= 1024) {
+							console.error("Text too long for search clipboard paste callback");
+							return; // Prevent buffer overflow
+						}
+						const encoder = new TextEncoder();
+						const utf8 = encoder.encode(text);
+
+						// Write bytes to WASM memory
+						const wasmMemory = odinMemoryInterface.memory;
+						const memView = new Uint8Array(wasmMemory.buffer, ptr, utf8.length);
+						memView.set(utf8);
+
+						// Odin callback, must be exported
+						const paste_to_search_callback = odinMemoryInterface.exports.paste_to_search_callback;
+						paste_to_search_callback(utf8.length);
+					}).catch(function(err) {
+						console.error("Clipboard paste to search error:", err);
+					});
+				};
 
 				return WebAssembly.instantiateStreaming(fetch("index.wasm"), newImports).then(function(output) {
 					var e = output.instance.exports;
